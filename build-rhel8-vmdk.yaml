@@ -1,0 +1,60 @@
+---
+- hosts: localhost
+  tasks:
+    - name: Install Image Builder
+      dnf:
+        name:
+        - lorax-composer
+        - composer-cli
+    - name: Start Image Builder
+      systemd:
+        name: lorax-composer.socket
+        state: started
+    - name: Import blueprint
+      command: composer-cli blueprints push blueprint.toml
+    - name: Start the VMDK compose
+      command: "composer-cli compose start {{ vcenter_vm_name }} vmdk"
+      register: compose_start_output
+    - set_fact:
+        compose_uuid: "{{ compose_start_output.stdout | regex_replace('^Compose (.*) added.*$','\\1') }}"
+    - debug:
+        msg: "{{ compose_uuid }}"
+    - name: Check the VMDK compose status
+      command: composer-cli compose status
+      register: compose_status_output
+      until: "{{ compose_status_output.stdout | regex_replace('^[\\s\\S]*' + compose_uuid + ' (\\w+)[\\s\\S]*$','\\1') is regex('FAILED|FINISHED')}}"
+      retries: 100
+    - name: Retrieve VMDK file
+      command: composer-cli compose image "{{ compose_uuid }}"
+    - name: Upload VMDK to vCenter
+      vsphere_copy:
+        hostname: "{{ vcenter_hostname }}"
+        username: "{{ vcenter_username }}"
+        password: "{{ vcenter_password }}"
+        validate_certs: no
+        src: "{{ compose_uuid }}-disk.vmdk"
+        datacenter: "{{ vcenter_datacenter }}"
+        datastore: "{{ vcenter_datastore }}"
+        path: "{{ vcenter_vmdk_folder_path }}/{{ vcenter_vm_name }}.vmdk"
+    - name: Create the VM
+      vmware_guest:
+        hostname: "{{ vcenter_hostname }}"
+        username: "{{ vcenter_username }}"
+        password: "{{ vcenter_password }}"
+        validate_certs: no
+        datacenter: "{{ vcenter_datacenter }}"
+        folder: "{{ vcenter_vm_folder_path }}"
+        name: "{{ vcenter_vm_name }}"
+        guest_id: rhel7_64Guest
+        cluster: "{{ vcenter_cluster }}"
+        disk:
+        - size_gb: 8
+          type: thin
+          filename: "[{{ vcenter_datastore }}] {{ vcenter_vmdk_folder_path }}/{{ vcenter_vm_name }}.vmdk"
+        hardware:
+          memory_mb: 8192
+          num_cpus: 2
+        networks:
+        - name: "{{ vcenter_network_external }}"
+        - name: "{{ vcenter_network_internal }}"
+

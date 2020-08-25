@@ -1,0 +1,10 @@
+name = "BLUEPRINT"
+description = "A blueprint"
+version = "0.0.1"
+modules = []
+groups = []
+
+[[packages]]
+name = "haproxy"
+version = "*"
+
